@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clash 流量监控</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>Clash 流量监控</h1>
+      <div class="range-tabs" id="rangeTabs">
+        <button data-range="1h">1 小时</button>
+        <button data-range="6h">6 小时</button>
+        <button data-range="24h" class="active">24 小时</button>
+        <button data-range="7d">7 天</button>
+        <button data-range="30d">30 天</button>
+        <button data-range="all">全部</button>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="collector-state" id="collectorState">
+        <span class="dot" id="stateDot"></span>
+        <span id="stateText">连接中</span>
+      </span>
+      <button class="ghost-btn" id="toggleBtn">暂停采集</button>
+    </div>
+  </header>
+
+  <section class="stats" id="stats">
+    <div class="stat">
+      <div class="stat-label">总流量</div>
+      <div class="stat-value accent" id="statTotal">-</div>
+      <div class="stat-hint" id="statUpDown">上行 - / 下行 -</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">直连</div>
+      <div class="stat-value" id="statDirect">-</div>
+      <div class="stat-hint" id="statDirectPct">不消耗套餐</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">走代理</div>
+      <div class="stat-value" id="statProxy">-</div>
+      <div class="stat-hint" id="statProxyPct">消耗机场套餐</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">覆盖范围</div>
+      <div class="stat-value small" id="statScope">-</div>
+      <div class="stat-hint" id="statScopeHint">-</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>流量消耗趋势</h2>
+        <p class="panel-sub" id="chartSub">每根柱子代表该时段内消耗的流量</p>
+      </div>
+      <label class="select-wrap">
+        <span>分组</span>
+        <select id="groupBy">
+          <option value="proc">按进程</option>
+          <option value="host">按域名</option>
+          <option value="chain">按出站节点</option>
+          <option value="rule">按命中规则</option>
+        </select>
+      </label>
+    </div>
+    <div id="chart" class="chart"></div>
+    <div class="empty" id="chartEmpty" hidden>该时间范围内没有采集到数据</div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2 id="rankTitle">消耗排行</h2>
+        <p class="panel-sub">按所选分组维度统计，份额为占该时间范围总流量的比例</p>
+      </div>
+    </div>
+    <table class="rank-table">
+      <thead>
+        <tr>
+          <th class="col-rank">#</th>
+          <th>名称</th>
+          <th class="col-bar">占比</th>
+          <th class="col-num">合计</th>
+          <th class="col-num">上行</th>
+          <th class="col-num">下行</th>
+          <th class="col-num">份额</th>
+        </tr>
+      </thead>
+      <tbody id="rankBody"></tbody>
+    </table>
+    <div class="empty" id="rankEmpty" hidden>该时间范围内没有采集到数据</div>
+  </section>
+
+  <footer class="foot">
+    <span id="footInfo">数据仅覆盖采集器运行期间，未运行时段不会被记录</span>
+  </footer>
+
+</div>
+
+<script src="vendor/echarts.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

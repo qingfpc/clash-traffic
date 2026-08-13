@@ -1,0 +1,6 @@
+# 第三方压缩产物按二进制对待，避免行尾转换改动文件内容
+web/vendor/** -text
+
+# 双击入口依赖 Windows 行尾；VBS 需保持 UTF-16 编码，不做任何转换
+*.cmd text eol=crlf
+*.vbs -text
