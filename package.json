@@ -6,7 +6,8 @@
   "description": "Clash Verge 流量采集与实时监控",
   "scripts": {
     "start": "node src/index.js",
-    "import-legacy": "node scripts/import-legacy.js"
+    "import-legacy": "node scripts/import-legacy.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=22.5.0"

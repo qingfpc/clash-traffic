@@ -2,10 +2,11 @@
 // 按「分钟 + 维度组合」累加写库。
 import { getConnections } from './clash.js';
 import { upsertRows, setMeta } from './db.js';
+import { buildProcessLookup } from './process-lookup.js';
 
 const DIMENSION_SEPARATOR = '\u0001';
 
-function extractDimensions(conn) {
+function extractDimensions(conn, processLookup) {
   const meta = conn.metadata ?? {};
 
   const host = meta.host || meta.sniffHost || meta.destinationIP || '(unknown)';
@@ -13,6 +14,9 @@ function extractDimensions(conn) {
   let proc = meta.process;
   if (!proc && meta.processPath) {
     proc = String(meta.processPath).split(/[\\/]/).pop();
+  }
+  if (!proc && processLookup) {
+    proc = processLookup(meta.network, meta.sourcePort);
   }
   if (!proc) proc = '(未知进程)';
 
@@ -118,6 +122,12 @@ export class Collector {
     this.connectionCount = connections.length;
     this.lastSampleAt = Date.now();
 
+    const needsLookup = !this.needsBaseline && connections.some((conn) => {
+      const meta = conn.metadata ?? {};
+      return !meta.process && !meta.processPath;
+    });
+    const processLookup = needsLookup ? await buildProcessLookup() : null;
+
     const seen = new Map();
     const buckets = new Map();
     const ts = Math.floor(Date.now() / 60000) * 60;
@@ -143,7 +153,7 @@ export class Collector {
       const incDown = down >= prevDown ? down - prevDown : down;
       if (incUp <= 0 && incDown <= 0) continue;
 
-      const dims = extractDimensions(conn);
+      const dims = extractDimensions(conn, processLookup);
       const key = [dims.proc, dims.host, dims.chain, dims.rule, dims.net, dims.geo].join(DIMENSION_SEPARATOR);
 
       let row = buckets.get(key);
