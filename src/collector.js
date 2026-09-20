@@ -6,19 +6,10 @@ import { buildProcessLookup } from './process-lookup.js';
 
 const DIMENSION_SEPARATOR = '\u0001';
 
-function extractDimensions(conn, processLookup) {
+function extractDimensions(conn, proc) {
   const meta = conn.metadata ?? {};
 
   const host = meta.host || meta.sniffHost || meta.destinationIP || '(unknown)';
-
-  let proc = meta.process;
-  if (!proc && meta.processPath) {
-    proc = String(meta.processPath).split(/[\\/]/).pop();
-  }
-  if (!proc && processLookup) {
-    proc = processLookup(meta.network, meta.sourcePort);
-  }
-  if (!proc) proc = '(未知进程)';
 
   // chains 从出口到入口排列，第一个即流量实际走的节点。
   const chains = Array.isArray(conn.chains) ? conn.chains : [];
@@ -31,6 +22,23 @@ function extractDimensions(conn, processLookup) {
   const geo = Array.isArray(geoList) && geoList.length ? String(geoList[0]) : '';
 
   return { proc, host, chain, rule, net: meta.network || '', geo };
+}
+
+/**
+ * 进程字段优先于 OS 端口反查；同一连接一旦归属成功，后续采样复用结果。
+ * 未归属不会缓存，以便下一个采样周期继续尝试。
+ */
+export function resolveProcessAttribution(conn, processLookup, cached) {
+  const meta = conn.metadata ?? {};
+  if (meta.process) return { name: String(meta.process), source: 'mihomo' };
+  if (meta.processPath) {
+    return { name: String(meta.processPath).split(/[\\/]/).pop(), source: 'mihomo' };
+  }
+  if (cached) return cached;
+
+  const name = processLookup?.(meta.network, meta.sourcePort);
+  if (name) return { name, source: 'windows-port' };
+  return { name: '(未归属)', source: 'unresolved' };
 }
 
 export class Collector {
@@ -51,6 +59,8 @@ export class Collector {
     this.lastError = null;
     this.connectionCount = 0;
     this.lastDelta = { up: 0, down: 0 };
+    this.connectionAttributions = new Map();
+    this.lastAttribution = { mihomo: 0, windowsPort: 0, unresolved: 0 };
   }
 
   start() {
@@ -58,6 +68,7 @@ export class Collector {
     this.running = true;
     this.startedAt = Date.now();
     this.needsBaseline = true;
+    this.connectionAttributions.clear();
     setMeta(this.db, 'lastStartedAt', this.startedAt);
     this.tick();
   }
@@ -80,6 +91,7 @@ export class Collector {
     // 暂停期间连接的累计值仍在增长，直接续算会把这段流量灌进恢复后的第一个桶。
     this.needsBaseline = true;
     this.previous.clear();
+    this.connectionAttributions.clear();
   }
 
   getStatus() {
@@ -93,7 +105,8 @@ export class Collector {
       errorCount: this.errorCount,
       lastError: this.lastError,
       connectionCount: this.connectionCount,
-      lastDelta: this.lastDelta
+      lastDelta: this.lastDelta,
+      processAttribution: this.lastAttribution
     };
   }
 
@@ -122,17 +135,19 @@ export class Collector {
     this.connectionCount = connections.length;
     this.lastSampleAt = Date.now();
 
-    const needsLookup = !this.needsBaseline && connections.some((conn) => {
+    const needsLookup = connections.some((conn) => {
       const meta = conn.metadata ?? {};
-      return !meta.process && !meta.processPath;
+      return !meta.process && !meta.processPath && !this.connectionAttributions.has(conn.id);
     });
     const processLookup = needsLookup ? await buildProcessLookup() : null;
 
     const seen = new Map();
+    const nextAttributions = new Map();
     const buckets = new Map();
     const ts = Math.floor(Date.now() / 60000) * 60;
     let deltaUp = 0;
     let deltaDown = 0;
+    const attribution = { mihomo: 0, windowsPort: 0, unresolved: 0 };
 
     for (const conn of connections) {
       const id = conn.id;
@@ -141,6 +156,12 @@ export class Collector {
       const up = Number(conn.upload) || 0;
       const down = Number(conn.download) || 0;
       seen.set(id, { up, down });
+
+      const resolved = resolveProcessAttribution(conn, processLookup, this.connectionAttributions.get(id));
+      if (resolved.source === 'mihomo') attribution.mihomo++;
+      else if (resolved.source === 'windows-port') attribution.windowsPort++;
+      else attribution.unresolved++;
+      if (resolved.source !== 'unresolved') nextAttributions.set(id, resolved);
 
       if (this.needsBaseline) continue;
 
@@ -153,7 +174,7 @@ export class Collector {
       const incDown = down >= prevDown ? down - prevDown : down;
       if (incUp <= 0 && incDown <= 0) continue;
 
-      const dims = extractDimensions(conn, processLookup);
+      const dims = extractDimensions(conn, resolved.name);
       const key = [dims.proc, dims.host, dims.chain, dims.rule, dims.net, dims.geo].join(DIMENSION_SEPARATOR);
 
       let row = buckets.get(key);
@@ -168,10 +189,12 @@ export class Collector {
     }
 
     this.previous = seen;
+    this.connectionAttributions = nextAttributions;
+    this.lastAttribution = attribution;
 
     if (this.needsBaseline) {
       this.needsBaseline = false;
-      return { baseline: true, connections: connections.length, rows: 0 };
+      return { baseline: true, connections: connections.length, rows: 0, attribution };
     }
 
     const rows = [...buckets.values()];
@@ -181,6 +204,6 @@ export class Collector {
     this.lastDelta = { up: deltaUp, down: deltaDown };
     setMeta(this.db, 'lastSampleAt', this.lastSampleAt);
 
-    return { baseline: false, connections: connections.length, rows: rows.length, up: deltaUp, down: deltaDown };
+    return { baseline: false, connections: connections.length, rows: rows.length, up: deltaUp, down: deltaDown, attribution };
   }
 }

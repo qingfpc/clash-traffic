@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProcessLookup, parsePidToName, parsePortToPid } from '../src/process-lookup.js';
+import { resolveProcessAttribution } from '../src/collector.js';
 
 test('Windows 端口快照可按协议和本地端口定位 PID', () => {
   const ports = parsePortToPid([
@@ -22,4 +23,26 @@ test('端口查询仅返回同协议端口对应的进程名', () => {
   assert.equal(lookup('tcp', 50121), 'chrome.exe');
   assert.equal(lookup('udp', 50121), '');
   assert.equal(lookup('tcp', 50122), '');
+});
+
+test('进程归属优先使用 Mihomo 字段，再复用连接缓存', () => {
+  const connection = { metadata: { network: 'tcp', sourcePort: 50121 } };
+  const lookup = () => 'chrome.exe';
+
+  assert.deepEqual(
+    resolveProcessAttribution({ metadata: { processPath: 'C:\\Program Files\\app.exe' } }, lookup),
+    { name: 'app.exe', source: 'mihomo' }
+  );
+  assert.deepEqual(
+    resolveProcessAttribution(connection, lookup),
+    { name: 'chrome.exe', source: 'windows-port' }
+  );
+  assert.deepEqual(
+    resolveProcessAttribution(connection, () => '', { name: 'chrome.exe', source: 'windows-port' }),
+    { name: 'chrome.exe', source: 'windows-port' }
+  );
+  assert.deepEqual(
+    resolveProcessAttribution(connection, () => ''),
+    { name: '(未归属)', source: 'unresolved' }
+  );
 });
