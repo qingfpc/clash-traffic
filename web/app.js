@@ -68,6 +68,11 @@ function formatDuration(seconds) {
   return `${(seconds / 86400).toFixed(1)} 天`;
 }
 
+function displayProcessName(name) {
+  // 旧版本已落库的标签不能可靠回填，明确与新版本的实时未归属区分。
+  return name === '(未知进程)' ? '(历史未归属)' : name;
+}
+
 function bucketLabel(seconds) {
   if (seconds < 3600) return `${seconds / 60} 分钟`;
   if (seconds < 86400) return `${seconds / 3600} 小时`;
@@ -93,6 +98,10 @@ function renderStatus(status) {
 
   let cls = 'dot live';
   let text = `采集中 · ${c.connectionCount} 个连接`;
+  const attribution = c.processAttribution;
+  if (attribution && c.running && !c.paused) {
+    text += ` · ${attribution.unresolved || 0} 个未归属`;
+  }
 
   if (!c.running) {
     cls = 'dot error';
@@ -111,6 +120,9 @@ function renderStatus(status) {
 
   const parts = [`已采样 ${c.sampleCount} 次`];
   if (c.lastSampleAt) parts.push(`最后采样 ${formatClock(c.lastSampleAt)}`);
+  if (attribution) {
+    parts.push(`进程归属：Mihomo ${attribution.mihomo || 0} · Windows ${attribution.windowsPort || 0} · 未归属 ${attribution.unresolved || 0}`);
+  }
   parts.push(`数据库 ${formatBytes(status.dbBytes)}`);
   el.footInfo.textContent = `${parts.join(' · ')}　|　数据仅覆盖采集器运行期间`;
 
@@ -169,7 +181,7 @@ function renderChart(data) {
         const total = params.reduce((sum, p) => sum + (Number(p.value) || 0), 0);
         if (!rows.length) return `${params[0].axisValue}<br>无流量`;
         const lines = rows
-          .map((p) => `${p.marker}${escapeHtml(p.seriesName)} <b>${formatBytes(p.value)}</b>`)
+          .map((p) => `${p.marker}${escapeHtml(displayProcessName(p.seriesName))} <b>${formatBytes(p.value)}</b>`)
           .join('<br>');
         return `<div style="margin-bottom:4px;color:#6b7280">${params[0].axisValue}</div>${lines}` +
           `<div style="margin-top:5px;padding-top:5px;border-top:1px solid #eee;color:#6b7280">合计 ${formatBytes(total)}</div>`;
@@ -197,7 +209,7 @@ function renderChart(data) {
       axisLabel: { color: '#9ca3af', fontSize: 11, formatter: (v) => formatBytes(v) }
     },
     series: data.series.map((s) => ({
-      name: s.name,
+      name: displayProcessName(s.name),
       type: 'line',
       stack: 'total',
       smooth: 0.2,
@@ -224,7 +236,7 @@ function renderRanking(data) {
   const total = data.total || 1;
 
   el.rankBody.innerHTML = items.map((item, index) => {
-    const name = escapeHtml(item.name);
+    const name = escapeHtml(data.groupBy === 'proc' ? displayProcessName(item.name) : item.name);
     const width = ((item.total / max) * 100).toFixed(1);
     const share = ((item.total / total) * 100).toFixed(1);
     const color = PALETTE[index % PALETTE.length];
